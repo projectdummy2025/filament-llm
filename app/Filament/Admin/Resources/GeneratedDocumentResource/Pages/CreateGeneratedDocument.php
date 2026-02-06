@@ -3,8 +3,11 @@
 namespace App\Filament\Admin\Resources\GeneratedDocumentResource\Pages;
 
 use App\Filament\Admin\Resources\GeneratedDocumentResource;
-use App\Jobs\GenerateDocumentJob;
+use App\Models\GeneratedDocument;
+use App\Services\DocumentGeneratorService;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
+use Illuminate\Database\Eloquent\Model;
 
 class CreateGeneratedDocument extends CreateRecord
 {
@@ -12,23 +15,52 @@ class CreateGeneratedDocument extends CreateRecord
 
     protected ?string $prompt = null;
 
-    protected function mutateFormDataBeforeCreate(array $data): array
+    protected function handleRecordCreation(array $data): Model
     {
-        $this->prompt = (string) ($data['prompt'] ?? '');
+        $prompt = (string) ($data['prompt'] ?? '');
         unset($data['prompt']);
 
-        return $data;
-    }
+        $record = new GeneratedDocument($data);
+        $record->save();
 
-    protected function afterCreate(): void
-    {
-        if ($this->record === null) {
-            return;
+        try {
+            $record->refresh(); // Load relationships if needed, or just ID
+
+            // Perform generation synchronously
+            $service = app(DocumentGeneratorService::class);
+            $template = $record->template;
+             
+            if (!$template) {
+                 throw new \RuntimeException('Template not found');
+            }
+            
+            $resultPath = $service->generate($template, $prompt);
+
+            $record->update([
+                'result_file_path' => $resultPath,
+            ]);
+
+            Notification::make()
+                ->title('Document generated successfully')
+                ->success()
+                ->send();
+
+        } catch (\Throwable $e) {
+            $record->update([
+                'error_message' => $e->getMessage(),
+            ]);
+            
+            Notification::make()
+                ->title('Generation failed')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+            
+            // Re-throw so Filament knows it failed? 
+            // Actually if we throw, the record transaction might rollback if we didn't save it first.
+            // But we already saved it.
         }
 
-        GenerateDocumentJob::dispatch(
-            generatedDocumentId: $this->record->getKey(),
-            prompt: $this->prompt ?? '',
-        );
+        return $record;
     }
 }

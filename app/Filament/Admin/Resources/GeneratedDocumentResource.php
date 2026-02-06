@@ -27,24 +27,37 @@ class GeneratedDocumentResource extends Resource
     {
         return $form
             ->schema([
-                Hidden::make('user_id')
-                    ->default(fn (): ?int => auth()->id())
-                    ->required(),
-                Select::make('document_template_id')
-                    ->label('Template')
-                    ->relationship('template', 'name')
-                    ->required(),
-                Textarea::make('prompt')
-                    ->label('Prompt')
-                    ->helperText('Tidak disimpan ke database. Hanya dipakai untuk generate.')
-                    ->required()
-                    ->rows(6)
-                    ->dehydrated(false),
-                FileUpload::make('source_file_path')
-                    ->label('Source File (opsional)')
-                    ->disk('public')
-                    ->directory('sources')
-                    ->preserveFilenames(),
+                \Filament\Forms\Components\Section::make('Generation Request')
+                    ->description('Create a new document generation task')
+                    ->schema([
+                        Hidden::make('user_id')
+                            ->default(fn (): ?int => auth()->id())
+                            ->required(),
+                        \Filament\Forms\Components\Grid::make(2)
+                            ->schema([
+                                Select::make('document_template_id')
+                                    ->label('Template')
+                                    ->relationship('template', 'name')
+                                    ->required()
+                                    ->native(false)
+                                    ->searchable()
+                                    ->preload(),
+                                FileUpload::make('source_file_path')
+                                    ->label('Source File (Optional)')
+                                    ->helperText('Upload a reference file if needed')
+                                    ->disk('public')
+                                    ->directory('sources')
+                                    ->preserveFilenames()
+                                    ->downloadable(),
+                            ]),
+                        Textarea::make('prompt')
+                            ->label('AI Instructions')
+                            ->helperText('Describe what you want the AI to generate based on the template. This information is not stored permanently.')
+                            ->required()
+                            ->rows(6)
+                            ->columnSpanFull()
+                            ->dehydrated(false),
+                    ]),
             ]);
     }
 
@@ -52,26 +65,51 @@ class GeneratedDocumentResource extends Resource
     {
         return $table
             ->columns([
-                TextColumn::make('template.name')->label('Template')->searchable(),
-                TextColumn::make('status')
-                    ->badge()
-                    ->colors([
-                        'gray' => 'pending',
-                        'warning' => 'processing',
-                        'success' => 'completed',
-                        'danger' => 'failed',
-                    ]),
-                TextColumn::make('created_at')->dateTime()->since(),
-                TextColumn::make('updated_at')->dateTime()->since()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('id')
+                    ->label('ID')
+                    ->sortable()
+                    ->searchable(),
+                TextColumn::make('template.name')
+                    ->label('Template')
+                    ->sortable()
+                    ->searchable()
+                    ->weight('bold'),
+                TextColumn::make('user.name')
+                    ->label('User')
+                    ->sortable()
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('created_at')
+                    ->dateTime()
+                    ->sortable()
+                    ->label('Created At'),
+                TextColumn::make('updated_at')
+                    ->dateTime()
+                    ->since()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 //
             ])
             ->actions([
                 Action::make('download')
-                    ->visible(fn (GeneratedDocument $record): bool => $record->status === 'completed' && filled($record->result_file_path))
+                    ->label('Download Result')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->visible(fn (GeneratedDocument $record): bool => filled($record->result_file_path))
                     ->action(function (GeneratedDocument $record) {
-                        return Storage::disk('public')->download($record->result_file_path);
+                        if (! Storage::disk('public')->exists($record->result_file_path)) {
+                            \Filament\Notifications\Notification::make()
+                                ->title('File not found')
+                                ->danger()
+                                ->send();
+                            return null;
+                        }
+
+                        $ext = pathinfo($record->result_file_path, PATHINFO_EXTENSION);
+                        $filename = str($record->template->name)->slug() . '-generated-' . $record->id . '.' . $ext;
+                        
+                        return Storage::disk('public')->download($record->result_file_path, $filename);
                     }),
             ])
             ->bulkActions([

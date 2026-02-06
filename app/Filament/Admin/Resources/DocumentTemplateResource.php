@@ -25,32 +25,44 @@ class DocumentTemplateResource extends Resource
     {
         return $form
             ->schema([
-                TextInput::make('name')
-                    ->required()
-                    ->maxLength(150),
-                Textarea::make('description')
-                    ->rows(3)
-                    ->columnSpanFull(),
-                Select::make('output_type')
-                    ->required()
-                    ->options([
-                        'docs' => 'Docs (.docx)',
-                        'excel' => 'Excel (.xlsx)',
+                \Filament\Forms\Components\Section::make('General Information')
+                    ->description('Manage document template details')
+                    ->schema([
+                        \Filament\Forms\Components\Grid::make(2)
+                            ->schema([
+                                TextInput::make('name')
+                                    ->required()
+                                    ->maxLength(150),
+                                Select::make('output_type')
+                                    ->required()
+                                    ->options([
+                                        'docs' => 'Docs (.docx)',
+                                        'excel' => 'Excel (.xlsx)',
+                                    ])
+                                    ->native(false)
+                                    ->live(),
+                            ]),
+                        Textarea::make('description')
+                            ->rows(3)
+                            ->columnSpanFull(),
+                        FileUpload::make('template_path')
+                            ->label('Template File')
+                            ->required()
+                            ->disk('public')
+                            ->directory('templates')
+                            ->preserveFilenames()
+                            ->columnSpanFull()
+                            ->downloadable()
+                            ->openable()
+                            ->acceptedFileTypes(fn (Get $get): array => match ($get('output_type')) {
+                                'docs' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+                                'excel' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+                                default => [
+                                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                ],
+                            }),
                     ])
-                    ->live(),
-                FileUpload::make('template_path')
-                    ->required()
-                    ->disk('public')
-                    ->directory('templates')
-                    ->preserveFilenames()
-                    ->acceptedFileTypes(fn (Get $get): array => match ($get('output_type')) {
-                        'docs' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-                        'excel' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-                        default => [
-                            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        ],
-                    }),
             ]);
     }
 
@@ -58,16 +70,27 @@ class DocumentTemplateResource extends Resource
     {
         return $table
             ->columns([
-                TextColumn::make('name')->searchable(),
+                TextColumn::make('name')
+                    ->searchable()
+                    ->sortable()
+                    ->weight('bold'),
                 TextColumn::make('output_type')
                     ->badge()
+                    ->sortable()
                     ->formatStateUsing(fn (string $state): string => $state === 'docs' ? 'Docs' : 'Excel')
                     ->colors([
                         'info' => 'docs',
                         'success' => 'excel',
                     ]),
-                TextColumn::make('template_path')->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('updated_at')->dateTime()->since(),
+                TextColumn::make('created_at')
+                    ->label('Created')
+                    ->dateTime()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('updated_at')
+                    ->dateTime()
+                    ->sortable()
+                    ->since(),
             ])
             ->filters([
                 //

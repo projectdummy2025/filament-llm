@@ -16,12 +16,10 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('document_template_id')->constrained('document_templates')->cascadeOnDelete();
             $table->string('source_file_path', 500)->nullable();
-            $table->enum('status', ['pending', 'processing', 'completed', 'failed'])->default('pending');
             $table->string('result_file_path', 500)->nullable();
             $table->text('error_message')->nullable();
             $table->timestamps();
 
-            $table->index(['status', 'created_at']);
             $table->index(['document_template_id', 'created_at']);
         });
     }

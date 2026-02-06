@@ -1,91 +1,40 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Services;
 
-use App\Models\GeneratedDocument;
-use App\Services\GeminiClient;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
+use App\Models\DocumentTemplate;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\IOFactory as SpreadsheetIOFactory;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use PhpOffice\PhpWord\TemplateProcessor;
 
-class GenerateDocumentJob implements ShouldQueue
+class DocumentGeneratorService
 {
-    use Dispatchable;
-    use InteractsWithQueue;
-    use Queueable;
-    use SerializesModels;
-
-    public int $timeout = 120;
-
-    public int $tries = 3;
-
-    /**
-     * @var array<int, int>
-     */
-    public array $backoff = [10, 30, 60];
-
     public function __construct(
-        public readonly int $generatedDocumentId,
-        public readonly string $prompt,
-    ) {
-    }
+        protected GeminiClient $geminiWithGemini
+    ) {}
 
-    /**
-     * Create a new job instance.
-     */
-    public function __construct()
+    public function generate(DocumentTemplate $template, string $prompt): string
     {
-        //
-    }
+        $systemRules = $this->buildSystemRules($template->output_type);
+        $fullPrompt = $systemRules . "\n\n" . trim($prompt);
 
-    /**
-     * Execute the job.
-     */
-    public function handle(): void
-    {
-        $generated = GeneratedDocument::query()->with('template')->findOrFail($this->generatedDocumentId);
+        Log::info("Generating document for template: {$template->name} ({$template->output_type})");
 
-        $generated->update([
-            'status' => 'processing',
-            'error_message' => null,
-        ]);
+        $aiText = $this->geminiWithGemini->generateText($fullPrompt, maxOutputTokens: 2000);
+        
+        Log::info("AI Response length: " . strlen($aiText));
+        Log::debug("AI Response content:\n" . $aiText);
 
-        try {
-            $template = $generated->template;
+        // Generate ID for filename
+        $fileId = str()->uuid()->toString();
 
-            if ($template === null) {
-                throw new \RuntimeException('Template not found.');
-            }
-
-            $systemRules = $this->buildSystemRules($template->output_type);
-            $fullPrompt = $systemRules . "\n\n" . trim($this->prompt);
-
-            $aiText = app(GeminiClient::class)->generateText($fullPrompt, maxOutputTokens: 1200);
-
-            $resultPath = match ($template->output_type) {
-                'docs' => $this->renderDocx($template->template_path, $generated->id, $aiText),
-                'excel' => $this->renderXlsx($template->template_path, $generated->id, $aiText),
-                default => throw new \RuntimeException('Invalid output_type.'),
-            };
-
-            $generated->update([
-                'status' => 'completed',
-                'result_file_path' => $resultPath,
-            ]);
-        } catch (\Throwable $e) {
-            $generated->update([
-                'status' => 'failed',
-                'error_message' => $e->getMessage(),
-            ]);
-
-            throw $e;
-        }
+        return match ($template->output_type) {
+            'docs' => $this->renderDocx($template->template_path, $fileId, $aiText),
+            'excel' => $this->renderXlsx($template->template_path, $fileId, $aiText),
+            default => throw new \RuntimeException('Invalid output_type.'),
+        };
     }
 
     private function buildSystemRules(string $outputType): string
@@ -94,7 +43,11 @@ class GenerateDocumentJob implements ShouldQueue
             return <<<TXT
 Kamu adalah generator konten dokumen.
 Output WAJIB format KEY=VALUE (1 baris per key), TANPA markdown, TANPA penjelasan.
-Gunakan key berikut saja: judul, ringkasan, isi
+Contoh:
+judul=Laporan Kegiatan
+deskripsi=Laporan ini berisi...
+
+Sesuaikan key dengan placeholder yang diminta user (jika ada).
 Jika butuh paragraf baru, gunakan literal \\n (backslash-n).
 TXT;
         }
@@ -110,9 +63,6 @@ TXT;
         throw new \RuntimeException('Invalid output_type rules.');
     }
 
-    /**
-     * @return array<string, string>
-     */
     private function parseKeyValue(string $text): array
     {
         $text = str_replace(["\r\n", "\r"], "\n", trim($text));
@@ -142,9 +92,6 @@ TXT;
         return $result;
     }
 
-    /**
-     * @return array<int, array<int, string>>
-     */
     private function parseTsvOrCsv(string $text): array
     {
         $text = str_replace(["\r\n", "\r"], "\n", trim($text));
@@ -170,7 +117,7 @@ TXT;
         return $rows;
     }
 
-    private function renderDocx(string $templatePath, int $generatedId, string $aiText): string
+    private function renderDocx(string $templatePath, string $fileId, string $aiText): string
     {
         $templateFullPath = Storage::disk('public')->path($templatePath);
         if (!is_file($templateFullPath)) {
@@ -179,12 +126,24 @@ TXT;
 
         $map = $this->parseKeyValue($aiText);
 
+        Log::info("Parsed Keys from AI: " . implode(', ', array_keys($map)));
+
         $processor = new TemplateProcessor($templateFullPath);
+        
+        // Get all variables in the template (requires reading internal XML, PHPWord template processor doesn't expose getVariables easily publically in older versions, but let's try just setting values)
+        // Check if we can log available variables? PHPWord TemplateProcessor getVariables() returns array.
+        try {
+            $variables = $processor->getVariables();
+            Log::info("Template Placeholders: " . implode(', ', $variables));
+        } catch (\Throwable $e) {
+            Log::warning("Could not list template variables: " . $e->getMessage());
+        }
+
         foreach ($map as $key => $value) {
             $processor->setValue($key, str_replace('\\n', "\n", $value));
         }
 
-        $outRelPath = 'generated/' . $generatedId . '.docx';
+        $outRelPath = 'generated/' . $fileId . '.docx';
         $outFullPath = Storage::disk('public')->path($outRelPath);
         @mkdir(dirname($outFullPath), 0775, true);
 
@@ -193,7 +152,7 @@ TXT;
         return $outRelPath;
     }
 
-    private function renderXlsx(string $templatePath, int $generatedId, string $aiText): string
+    private function renderXlsx(string $templatePath, string $fileId, string $aiText): string
     {
         $templateFullPath = Storage::disk('public')->path($templatePath);
         if (!is_file($templateFullPath)) {
@@ -214,7 +173,7 @@ TXT;
             }
         }
 
-        $outRelPath = 'generated/' . $generatedId . '.xlsx';
+        $outRelPath = 'generated/' . $fileId . '.xlsx';
         $outFullPath = Storage::disk('public')->path($outRelPath);
         @mkdir(dirname($outFullPath), 0775, true);
 
