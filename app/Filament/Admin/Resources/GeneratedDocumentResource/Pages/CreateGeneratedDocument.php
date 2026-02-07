@@ -34,7 +34,9 @@ class CreateGeneratedDocument extends CreateRecord
                  throw new \RuntimeException('Template not found');
             }
             
-            $resultPath = $service->generate($template, $prompt);
+            // Pass source file path if available
+            $sourceFilePath = $record->source_file_path ?? null;
+            $resultPath = $service->generate($template, $prompt, $sourceFilePath);
 
             $record->update([
                 'result_file_path' => $resultPath,

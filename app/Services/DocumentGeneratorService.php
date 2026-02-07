@@ -18,23 +18,162 @@ class DocumentGeneratorService
         protected GeminiClient $geminiClient
     ) {}
 
-    public function generate(DocumentTemplate $template, string $prompt): string
+    public function generate(DocumentTemplate $template, string $prompt, ?string $sourceFilePath = null): string
     {
         Log::info("Generating document for template: {$template->name} ({$template->output_type})");
 
         $fileId = str()->uuid()->toString();
+        
+        // Extract content from source file if provided
+        $sourceContent = null;
+        if ($sourceFilePath) {
+            $sourceContent = $this->extractSourceFileContent($sourceFilePath);
+            Log::info("Source file content extracted: " . strlen($sourceContent) . " chars");
+        }
 
         return match ($template->output_type) {
-            'docs' => $this->generateDocx($template->template_path, $fileId, $prompt),
-            'excel' => $this->generateXlsx($template->template_path, $fileId, $prompt),
+            'docs' => $this->generateDocx($template->template_path, $fileId, $prompt, $sourceContent),
+            'excel' => $this->generateXlsx($template->template_path, $fileId, $prompt, $sourceContent),
             default => throw new \RuntimeException('Invalid output_type.'),
         };
     }
 
     /**
+     * Extract text content from source file (DOCX, XLSX, PDF, TXT).
+     */
+    private function extractSourceFileContent(string $filePath): ?string
+    {
+        $fullPath = Storage::disk('public')->path($filePath);
+        
+        if (!is_file($fullPath)) {
+            Log::warning("Source file not found: {$fullPath}");
+            return null;
+        }
+
+        $extension = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
+        Log::info("Extracting content from source file: {$filePath} (type: {$extension})");
+
+        try {
+            return match ($extension) {
+                'docx' => $this->extractDocxContent($fullPath),
+                'xlsx', 'xls' => $this->extractXlsxContent($fullPath),
+                'txt', 'csv' => $this->extractTextContent($fullPath),
+                'pdf' => $this->extractPdfContent($fullPath),
+                default => $this->extractTextContent($fullPath),
+            };
+        } catch (\Throwable $e) {
+            Log::warning("Failed to extract source file content: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Extract text from DOCX file.
+     */
+    private function extractDocxContent(string $filePath): string
+    {
+        $phpWord = WordIOFactory::load($filePath);
+        $text = '';
+
+        foreach ($phpWord->getSections() as $section) {
+            foreach ($section->getElements() as $element) {
+                $text .= $this->getElementText($element) . "\n";
+                
+                // Handle tables
+                if ($element instanceof Table) {
+                    foreach ($element->getRows() as $row) {
+                        $rowText = [];
+                        foreach ($row->getCells() as $cell) {
+                            $cellText = '';
+                            foreach ($cell->getElements() as $cellElement) {
+                                $cellText .= $this->getElementText($cellElement);
+                            }
+                            $rowText[] = trim($cellText);
+                        }
+                        $text .= implode("\t", $rowText) . "\n";
+                    }
+                }
+            }
+        }
+
+        return trim($text);
+    }
+
+    /**
+     * Extract text from XLSX file.
+     */
+    private function extractXlsxContent(string $filePath): string
+    {
+        $spreadsheet = SpreadsheetIOFactory::load($filePath);
+        $text = '';
+
+        foreach ($spreadsheet->getAllSheets() as $sheetIndex => $sheet) {
+            $sheetName = $sheet->getTitle();
+            $text .= "=== Sheet: {$sheetName} ===\n";
+
+            $highestRow = $sheet->getHighestRow();
+            $highestColumn = $sheet->getHighestColumn();
+            $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
+
+            for ($row = 1; $row <= $highestRow; $row++) {
+                $rowData = [];
+                for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                    $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+                    $value = $sheet->getCell($colLetter . $row)->getValue();
+                    $rowData[] = trim((string)($value ?? ''));
+                }
+                // Skip empty rows
+                if (implode('', $rowData) !== '') {
+                    $text .= implode("\t", $rowData) . "\n";
+                }
+            }
+            $text .= "\n";
+        }
+
+        return trim($text);
+    }
+
+    /**
+     * Extract text from plain text file.
+     */
+    private function extractTextContent(string $filePath): string
+    {
+        return trim(file_get_contents($filePath) ?: '');
+    }
+
+    /**
+     * Extract text from PDF file (basic extraction).
+     */
+    private function extractPdfContent(string $filePath): string
+    {
+        // Check if Smalot PDF Parser is available
+        if (class_exists(\Smalot\PdfParser\Parser::class)) {
+            try {
+                $parser = new \Smalot\PdfParser\Parser();
+                $pdf = $parser->parseFile($filePath);
+                return trim($pdf->getText());
+            } catch (\Throwable $e) {
+                Log::warning("PDF parsing failed: " . $e->getMessage());
+            }
+        }
+
+        // Fallback: try pdftotext command if available
+        $output = [];
+        $returnVar = 0;
+        exec("pdftotext " . escapeshellarg($filePath) . " - 2>/dev/null", $output, $returnVar);
+        
+        if ($returnVar === 0 && !empty($output)) {
+            return trim(implode("\n", $output));
+        }
+
+        Log::warning("PDF extraction not available. Install smalot/pdfparser or pdftotext.");
+        return "[PDF content could not be extracted]";
+    }
+
+    /**
      * Generate DOCX by reading template structure, sending to AI, and creating new document.
      */
-    private function generateDocx(string $templatePath, string $fileId, string $userPrompt): string
+    private function generateDocx(string $templatePath, string $fileId, string $userPrompt, ?string $sourceContent = null): string
     {
         $templateFullPath = Storage::disk('public')->path($templatePath);
         if (!is_file($templateFullPath)) {
@@ -52,11 +191,21 @@ class DocumentGeneratorService
         Log::info("Template structure analyzed: " . count($templateStructure['elements']) . " elements found");
         Log::debug("Template structure:\n" . json_encode($templateStructure, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
-        // Step 2: Build prompt with template structure
+        // Step 2: Build prompt with template structure and source content
         $systemPrompt = $this->buildDocxPrompt($templateStructure);
         
+        // Add source content if available
+        $sourceSection = '';
+        if ($sourceContent) {
+            $sourceSection = "\n\n===========================================\n" .
+                "## DATA SUMBER (GUNAKAN SEBAGAI REFERENSI):\n" .
+                "===========================================\n" .
+                $sourceContent . "\n" .
+                "===========================================\n";
+        }
+        
         // Emphasize user instructions
-        $fullPrompt = $systemPrompt . "\n\n" . 
+        $fullPrompt = $systemPrompt . $sourceSection . "\n\n" . 
             "===========================================\n" .
             "## INSTRUKSI USER (WAJIB DIIKUTI):\n" .
             "===========================================\n" .
@@ -572,7 +721,7 @@ PROMPT;
     /**
      * Generate XLSX from template.
      */
-    private function generateXlsx(string $templatePath, string $fileId, string $userPrompt): string
+    private function generateXlsx(string $templatePath, string $fileId, string $userPrompt, ?string $sourceContent = null): string
     {
         $templateFullPath = Storage::disk('public')->path($templatePath);
         if (!is_file($templateFullPath)) {
@@ -598,8 +747,8 @@ PROMPT;
 
         Log::info("Excel template headers: " . implode(', ', $headers));
 
-        // Build prompt
-        $prompt = $this->buildExcelPrompt($headers, $userPrompt);
+        // Build prompt with source content
+        $prompt = $this->buildExcelPrompt($headers, $userPrompt, $sourceContent);
         
         // Call AI
         $aiResponse = $this->geminiClient->generateText($prompt, maxOutputTokens: 3000);
@@ -634,9 +783,21 @@ PROMPT;
     /**
      * Build prompt for Excel generation.
      */
-    private function buildExcelPrompt(array $headers, string $userPrompt): string
+    private function buildExcelPrompt(array $headers, string $userPrompt, ?string $sourceContent = null): string
     {
         $headerList = implode(', ', $headers);
+        
+        $sourceSection = '';
+        if ($sourceContent) {
+            $sourceSection = <<<SOURCE
+
+===========================================
+DATA SUMBER (GUNAKAN SEBAGAI REFERENSI):
+===========================================
+{$sourceContent}
+===========================================
+SOURCE;
+        }
         
         return <<<PROMPT
 Kamu adalah AI yang menghasilkan data tabel.
@@ -644,6 +805,7 @@ Kamu adalah AI yang menghasilkan data tabel.
 KOLOM YANG TERSEDIA DI TEMPLATE: {$headerList}
 
 TUGAS: Generate data untuk mengisi tabel berdasarkan instruksi user.
+{$sourceSection}
 
 FORMAT OUTPUT:
 - Output WAJIB format TSV (tab-separated values)
