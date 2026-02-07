@@ -4,7 +4,7 @@ Sistem AI Document Generator menggunakan pendekatan **Dynamic Rebuilding**. Sist
 
 ---
 
-## 📄 Template Word (.docx)
+## Template Word (.docx)
 
 Anda tidak perlu lagi menggunakan placeholder khusus seperti `${nama}`. Sistem bekerja dengan cara:
 
@@ -19,7 +19,7 @@ Anda tidak perlu lagi menggunakan placeholder khusus seperti `${nama}`. Sistem b
 
 ---
 
-## 📊 Template Excel (.xlsx)
+## Template Excel (.xlsx)
 
 Untuk Excel, sistem fokus pada pengisian data tabel:
 
@@ -29,7 +29,7 @@ Untuk Excel, sistem fokus pada pengisian data tabel:
 
 ---
 
-## 📂 Menggunakan File Sumber (Source File)
+## Menggunakan File Sumber (Source File)
 
 Sistem memiliki fitur unggulan di mana Anda bisa mengupload file sumber (PDF/Sreapsheet/Word) sebagai **referensi**.
 
@@ -41,6 +41,6 @@ Sistem memiliki fitur unggulan di mana Anda bisa mengupload file sumber (PDF/Sre
 
 ---
 
-## ⚠️ Hal yang Perlu Diperhatikan
+## Hal yang Perlu Diperhatikan
 - **Ukuran File**: Hindari template yang terlalu besar (> 10MB) karena dapat memperlambat proses analisis struktur.
 - **Tabel Kompleks**: Untuk hasil terbaik, gunakan tabel sederhana. Hindari *merged cells* yang terlalu rumit di dalam template.

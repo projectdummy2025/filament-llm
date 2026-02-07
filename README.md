@@ -41,6 +41,18 @@ Sistem penghasil dokumen otomatis berbasis AI (Gemini 2.5 Flash) yang terintegra
    ```bash
    php artisan storage:link
    ```
+6. Buat user admin secara manual (opsional):
+   Jalankan `php artisan tinker` lalu paste kode berikut:
+   ```php
+   use App\Models\User;
+   use Illuminate\Support\Facades\Hash;
+   
+   User::create([
+       'name' => 'Test User',
+       'email' => 'test@example.com',
+       'password' => Hash::make('password123'),
+   ]);
+   ```
 
 ## Cara Penggunaan
 

@@ -2,7 +2,7 @@
 
 Dokumen ini menjelaskan alur internal sistem AI Document Generator untuk pengembang.
 
-## 🧠 Alur Generasi Konten
+## Alur Generasi Konten
 
 Sistem menggunakan class `DocumentGeneratorService` untuk menangani semua logika pembuatan dokumen.
 
@@ -33,7 +33,7 @@ Setelah AI memberikan response:
   - Meniru elemen dari template asli (Font, Bold, Alignment).
   - Memasukkan konten dari AI ke dalam elemen baru tersebut.
 
-## 🛠️ Perintah Berguna
+## Perintah Berguna
 
 ### Membersihkan Cache
 Jika Anda melakukan perubahan pada config atau routes:
@@ -54,7 +54,7 @@ Semua aktivitas AI dicatat di log:
 tail -f storage/logs/laravel.log
 ```
 
-## ⚠️ Dependensi Penting
+## Dependensi Penting
 - `google/gax`: Digunakan oleh Gemini Client.
 - `phpoffice/phpword`: Manipulasi Docx.
 - `phpoffice/phpspreadsheet`: Manipulasi Xlsx.
