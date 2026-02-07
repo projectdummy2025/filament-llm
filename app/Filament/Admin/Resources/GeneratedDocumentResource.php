@@ -52,11 +52,12 @@ class GeneratedDocumentResource extends Resource
                             ]),
                         Textarea::make('prompt')
                             ->label('AI Instructions')
-                            ->helperText('Describe what you want the AI to generate based on the template. This information is not stored permanently.')
+                            ->helperText('Jelaskan secara detail apa yang ingin Anda generate. Contoh: "Buatkan transkrip untuk mahasiswa bernama Budi Santoso, NIM 123456, dengan nilai: Pemrograman Web A, Database B+, Jaringan A-"')
                             ->required()
                             ->rows(6)
                             ->columnSpanFull()
-                            ->dehydrated(false),
+                            ->placeholder('Contoh: Buatkan dokumen transkrip magang untuk mahasiswa bernama [nama], dengan nilai mata kuliah [daftar nilai]...')
+                            ->dehydrated(true),
                     ]),
             ]);
     }

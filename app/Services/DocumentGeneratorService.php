@@ -41,6 +41,12 @@ class DocumentGeneratorService
             throw new \RuntimeException('DOCX template file not found.');
         }
 
+        // Validate user prompt
+        $userPrompt = trim($userPrompt);
+        if (empty($userPrompt)) {
+            throw new \RuntimeException('Instruksi tidak boleh kosong. Silakan jelaskan apa yang ingin Anda generate.');
+        }
+
         // Step 1: Read and analyze template structure
         $templateStructure = $this->analyzeDocxTemplate($templateFullPath);
         Log::info("Template structure analyzed: " . count($templateStructure['elements']) . " elements found");
@@ -48,12 +54,21 @@ class DocumentGeneratorService
 
         // Step 2: Build prompt with template structure
         $systemPrompt = $this->buildDocxPrompt($templateStructure);
-        $fullPrompt = $systemPrompt . "\n\nINSTRUKSI USER:\n" . trim($userPrompt);
+        
+        // Emphasize user instructions
+        $fullPrompt = $systemPrompt . "\n\n" . 
+            "===========================================\n" .
+            "## INSTRUKSI USER (WAJIB DIIKUTI):\n" .
+            "===========================================\n" .
+            $userPrompt . "\n" .
+            "===========================================\n\n" .
+            "Sekarang generate dokumen berdasarkan instruksi di atas. Output langsung tanpa penjelasan:";
 
+        Log::info("User prompt: " . $userPrompt);
         Log::debug("Full prompt sent to AI:\n" . $fullPrompt);
 
-        // Step 3: Call AI
-        $aiResponse = $this->geminiClient->generateText($fullPrompt, maxOutputTokens: 4000);
+        // Step 3: Call AI with higher token limit for complex documents
+        $aiResponse = $this->geminiClient->generateText($fullPrompt, maxOutputTokens: 6000);
         Log::info("AI Response length: " . strlen($aiResponse));
         Log::debug("AI Response content:\n" . $aiResponse);
 
@@ -232,6 +247,53 @@ class DocumentGeneratorService
     }
 
     /**
+     * Detect content type hint based on text content.
+     */
+    private function detectContentHint(string $content): string
+    {
+        $contentLower = strtolower($content);
+        
+        if (str_contains($contentLower, 'kop') || str_contains($contentLower, 'perusahaan')) {
+            return ' (ISI: nama/alamat perusahaan)';
+        }
+        if (str_contains($contentLower, 'nim')) {
+            return ' (ISI: NIM dari instruksi user)';
+        }
+        if (str_contains($contentLower, 'nama') && !str_contains($contentLower, 'materi')) {
+            return ' (ISI: Nama dari instruksi user)';
+        }
+        if (str_contains($contentLower, 'program studi') || str_contains($contentLower, 'prodi')) {
+            return ' (ISI: Program studi)';
+        }
+        if (str_contains($contentLower, 'semester')) {
+            return ' (ISI: Semester)';
+        }
+        if (str_contains($contentLower, 'perguruan tinggi') || str_contains($contentLower, 'universitas')) {
+            return ' (ISI: Nama perguruan tinggi)';
+        }
+        if (str_contains($contentLower, 'pembimbing')) {
+            return ' (ISI: Nama pembimbing)';
+        }
+        if (str_contains($contentLower, 'dosen')) {
+            return ' (ISI: Nama dosen)';
+        }
+        if (str_contains($contentLower, 'waktu') || str_contains($contentLower, 'pelaksanaan')) {
+            return ' (ISI: Periode waktu)';
+        }
+        if (str_contains($contentLower, 'tanggal') || preg_match('/\d+\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)/i', $content)) {
+            return ' (ISI: Tanggal sesuai konteks)';
+        }
+        if (str_contains($contentLower, 'ttd') || str_contains($contentLower, 'tanda tangan')) {
+            return ' (ISI: Keterangan tanda tangan)';
+        }
+        if (str_contains($contentLower, 'catatan')) {
+            return ' (ISI: Catatan jika ada)';
+        }
+        
+        return '';
+    }
+
+    /**
      * Build prompt for AI based on template structure.
      */
     private function buildDocxPrompt(array $structure): string
@@ -242,54 +304,65 @@ class DocumentGeneratorService
         foreach ($structure['elements'] as $element) {
             if ($element['type'] === 'paragraph') {
                 $styleLabel = $element['style'] === 'heading' ? 'HEADING' : 'PARAGRAF';
-                $structureDesc .= "BAGIAN-{$sectionIndex} [{$styleLabel}]: \"{$element['content']}\"\n";
+                // Tambahkan petunjuk tentang jenis konten
+                $hint = $this->detectContentHint($element['content']);
+                $structureDesc .= "BAGIAN-{$sectionIndex} [{$styleLabel}]{$hint}: \"{$element['content']}\"\n";
                 $sectionIndex++;
             } elseif ($element['type'] === 'table') {
                 $structureDesc .= "BAGIAN-{$sectionIndex} [TABEL]: Kolom = " . implode(', ', $element['headers']) . "\n";
+                if (!empty($element['sampleRows'])) {
+                    $structureDesc .= "   Contoh data: " . implode(' | ', $element['sampleRows'][0] ?? []) . "\n";
+                }
                 $sectionIndex++;
             }
         }
 
         return <<<PROMPT
-Kamu adalah AI yang menghasilkan konten dokumen berdasarkan template.
+Kamu adalah AI penghasil dokumen profesional.
 
-STRUKTUR TEMPLATE DOKUMEN:
+## STRUKTUR TEMPLATE:
 {$structureDesc}
 
-TUGAS:
-Berdasarkan struktur template di atas, generate konten baru sesuai instruksi user.
-Ikuti struktur dan format yang sama dengan template.
+## ATURAN PENTING:
+1. WAJIB mengisi SEMUA bagian dengan konten BARU berdasarkan INSTRUKSI USER
+2. JANGAN menyalin konten template - generate konten baru sesuai permintaan user
+3. Untuk field seperti Nama, NIM, Tanggal - gunakan data dari instruksi user
+4. Untuk tabel - generate data sesuai permintaan user
+5. Pastikan format konsisten dengan template
 
-FORMAT OUTPUT WAJIB:
-1. Untuk setiap bagian teks, gunakan format:
-   [BAGIAN-n]
-   konten baru di sini
-   [/BAGIAN-n]
+## FORMAT OUTPUT:
+Untuk teks:
+[BAGIAN-n]
+konten baru sesuai instruksi user
+[/BAGIAN-n]
 
-2. Untuk tabel, gunakan format:
-   [TABEL]
-   kolom1\tkolom2\tkolom3
-   data1\tdata2\tdata3
-   [/TABEL]
+Untuk tabel (gunakan TAB sebagai pemisah):
+[TABEL]
+header1\theader2\theader3
+data1\tdata2\tdata3
+[/TABEL]
 
-3. JANGAN gunakan markdown
-4. JANGAN beri penjelasan tambahan
-5. Langsung output saja
+## CONTOH:
+Jika user meminta "Buatkan transkrip untuk Budi dengan nilai Matematika 85":
 
-CONTOH OUTPUT:
 [BAGIAN-1]
-Judul Dokumen Baru
+PT. NAMA PERUSAHAAN
 [/BAGIAN-1]
 
-[BAGIAN-2]
-Ini adalah isi paragraf pertama yang digenerate oleh AI.
-[/BAGIAN-2]
+[BAGIAN-5]
+NIM                     : (dari instruksi user)
+[/BAGIAN-5]
+
+[BAGIAN-6]
+Nama                    : Budi
+[/BAGIAN-6]
 
 [TABEL]
-Nama\tNilai\tKeterangan
-Budi\t85\tLulus
-Ani\t92\tLulus
+No.\tNama Materi\tNilai Angka
+1\tMatematika\t85
 [/TABEL]
+
+JANGAN gunakan markdown. JANGAN beri penjelasan. Langsung output saja.
 
 PROMPT;
     }
