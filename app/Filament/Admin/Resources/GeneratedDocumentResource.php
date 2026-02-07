@@ -27,49 +27,64 @@ class GeneratedDocumentResource extends Resource
     {
         return $form
             ->schema([
-                \Filament\Forms\Components\Section::make('Generation Request')
-                    ->description('Create a new document generation task')
+                \Filament\Forms\Components\Group::make()
                     ->schema([
-                        Hidden::make('user_id')
-                            ->default(fn (): ?int => auth()->id())
-                            ->required(),
-                        \Filament\Forms\Components\Grid::make(2)
+                        \Filament\Forms\Components\Section::make('Document Configuration')
+                            ->description('Configure the main parameters for your document.')
+                            ->icon('heroicon-m-document-text')
                             ->schema([
+                                Hidden::make('user_id')
+                                    ->default(fn (): ?int => auth()->id())
+                                    ->required(),
+                                    
                                 Select::make('document_template_id')
-                                    ->label('Template')
+                                    ->label('Choose Template')
                                     ->relationship('template', 'name')
                                     ->required()
                                     ->native(false)
                                     ->searchable()
-                                    ->preload(),
+                                    ->preload()
+                                    ->columnSpanFull()
+                                    ->helperText('Select the structure (DOCX/XLSX) you want to use.'),
+
+                                Textarea::make('prompt')
+                                    ->label('Instructions for AI')
+                                    ->helperText('Deskripsikan isi dokumen yang ingin Anda buat secara detail.')
+                                    ->required()
+                                    ->rows(8)
+                                    ->columnSpanFull()
+                                    ->placeholder("Contoh:\nBuatkan transkrip untuk Budi Santoso (NIM 12345).\nNilai:\n- Pemrograman Web: A\n- Basis Data: B+\n...")
+                                    ->dehydrated(true),
+                            ]),
+                    ])
+                    ->columnSpan(['lg' => 2]),
+
+                \Filament\Forms\Components\Group::make()
+                    ->schema([
+                        \Filament\Forms\Components\Section::make('Context Source')
+                            ->description('Optional reference file')
+                            ->icon('heroicon-m-paper-clip')
+                            ->schema([
                                 FileUpload::make('source_file_path')
-                                    ->label('Source File (Optional)')
-                                    ->helperText('Upload a reference file if needed')
+                                    ->label('Upload Source File')
                                     ->disk('public')
                                     ->directory('sources')
                                     ->preserveFilenames()
-                                    ->downloadable(),
-                            ]),
-                        Textarea::make('prompt')
-                            ->label('AI Instructions')
-                            ->helperText('Jelaskan secara detail apa yang ingin Anda generate. Contoh: "Buatkan transkrip untuk mahasiswa bernama Budi Santoso, NIM 123456, dengan nilai: Pemrograman Web A, Database B+, Jaringan A-"')
-                            ->required()
-                            ->rows(6)
-                            ->columnSpanFull()
-                            ->placeholder('Contoh: Buatkan dokumen transkrip magang untuk mahasiswa bernama [nama], dengan nilai mata kuliah [daftar nilai]...')
-                            ->dehydrated(true),
-                    ]),
-            ]);
+                                    ->downloadable()
+                                    ->columnSpanFull()
+                                    ->helperText('Supported: PDF, DOCX, XLSX. The AI will use this file as data source.'),
+                            ])
+                            ->collapsible(),
+                    ])
+                    ->columnSpan(['lg' => 1]),
+            ])
+            ->columns(3);
     }
 
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
-                TextColumn::make('id')
-                    ->label('ID')
-                    ->sortable()
-                    ->searchable(),
                 TextColumn::make('template.name')
                     ->label('Template')
                     ->sortable()

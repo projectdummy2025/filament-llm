@@ -64,4 +64,7 @@ Untuk memahami lebih dalam tentang sistem ini, silakan merujuk pada dokumen beri
 | **[Panduan Teknis](docs/technical-guide.md)** | Dokumentasi implementasi kode, alur logika internal, dan dependensi sistem. | Pengembang (Developer) |
 
 ---
+
+> *"Perfection is not a destination, but a continuous journey. This project is a living exploration of AI's potential in document automation—constantly evolving, improving, and adapting to new possibilities."*
+
 Copyright 2026 AI Document Generator Project
