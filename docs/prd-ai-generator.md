@@ -162,42 +162,22 @@ Index minimal:
 
 Target utama fase ini adalah hemat token, jadi kontrak output **tidak menggunakan JSON**.
 
-### 8.1 Output untuk Docs (`.docx`) — Format `KEY=VALUE`
-AI mengembalikan teks terstruktur, 1 baris per key.
+### 8.1 Strategi Generasi Dokumen (Dynamic Rebuilding)
+Sistem tidak lagi menggunakan placeholder statis `${key}`. Sebagai gantinya, sistem melakukan:
+1. **Analisis Struktur**: Membaca elemen-elemen dokumen (Paragraf, Tabel, List) dari file template.
+2. **Contextual Prompting**: Mengirimkan struktur dokumen tersebut ke AI agar AI memahami layout yang diinginkan.
+3. **Penyusunan Ulang**: AI mengembalikan konten untuk setiap bagian (`BAGIAN 1`, `BAGIAN 2`, dst) dan setiap tabel (`TABEL 1`).
+4. **Rekonstruksi**: Sistem membangun dokumen baru dengan gaya (style) yang mewarisi dari template asli namun dengan konten baru dari AI.
 
-Contoh:
-```
-judul=Proposal Kerjasama
-ringkasan=Dokumen ini menjelaskan tujuan kerja sama...
-isi=Paragraf 1...\nParagraf 2...\nParagraf 3...
-```
+Aturan Output AI:
+- Dokumen dibagi menjadi blok-blok bertanda `BAGIAN n:`.
+- Tabel menggunakan format TSV di bawah tanda `TABEL n:`.
+- Tanpa penjelasan tambahan, langsung ke konten.
 
-Aturan:
-- Hanya output `KEY=VALUE`, tanpa markdown, tanpa penjelasan.
-- Untuk multi-paragraf gunakan `\n` (literal backslash-n), bukan enter asli.
-- Key yang didukung harus sesuai placeholder yang ada di template Word (contoh `${judul}`, `${ringkasan}`, `${isi}`).
-
-Renderer docx:
-- Load template `.docx` dari `document_templates.template_path`.
-- Replace placeholder `${key}` dengan `value`.
-
-### 8.2 Output untuk Excel (`.xlsx`) — Format TSV/CSV
-AI mengembalikan tabel sebagai **TSV** (disarankan) atau CSV.
-
-Contoh TSV:
-```
-Nama\tQty\tHarga
-Pensil\t10\t2000
-Buku\t5\t12000
-```
-
-Aturan:
-- Hanya output tabel TSV/CSV, tanpa markdown, tanpa penjelasan.
-- Baris pertama = header.
-
-Renderer xlsx:
-- Load template `.xlsx` dari `document_templates.template_path`.
-- Tulis header + rows mulai dari cell yang disepakati (mis. mulai `A1` untuk versi pertama).
+### 8.2 Ekstraksi File Sumber (Source File Extraction)
+Jika user mengupload file sumber (`pdf`, `docx`, `xlsx`, `txt`), sistem akan:
+- Mengekstrak teks mentah dari file tersebut.
+- Menyertakannya dalam prompt sebagai referensi utama bagi AI untuk menghasilkan konten yang akurat.
 
 ---
 
@@ -213,14 +193,14 @@ Catatan:
 - File template disimpan untuk kebutuhan **rendering** (layout/style/struktur dokumen), bukan untuk disisipkan ke prompt.
 
 Aturan wajib:
-- Output harus mengikuti kontrak di bagian 8 (Docs = `KEY=VALUE`, Excel = TSV/CSV).
+- Output harus mengikuti kontrak di bagian 8 (Docs = `BAGIAN n:`, Excel = TSV).
 - Jangan pakai markdown fence (```), jangan ada pembuka/penutup.
-- Jika ada karakter pemisah di dalam value (mis. `=`), AI harus menggantinya dengan karakter lain atau menuliskan ulang kalimat.
+- AI harus menghasilkan teks mentah yang terstruktur sesuai label yang diberikan.
 
 ### Mitigasi prompt injection
 - Anggap `input_payload` sebagai data, bukan instruksi utama.
 - System message menegaskan bahwa aturan output tidak boleh diabaikan.
-- Validasi output strict; jika format tidak sesuai kontrak → `failed`.
+- Validasi output strict; jika format tidak sesuai kontrak (misal label BAGIAN hilang) → `failed`.
 
 ---
 
