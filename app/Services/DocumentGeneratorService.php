@@ -589,7 +589,8 @@ PROMPT;
         $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
         
         for ($col = 1; $col <= $highestColumnIndex; $col++) {
-            $value = $sheet->getCellByColumnAndRow($col, 1)->getValue();
+            $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+            $value = $sheet->getCell($colLetter . '1')->getValue();
             if ($value !== null && trim((string)$value) !== '') {
                 $headers[] = trim((string)$value);
             }
@@ -611,7 +612,9 @@ PROMPT;
         $startRow = 2;
         foreach ($rows as $rowIndex => $row) {
             foreach ($row as $colIndex => $value) {
-                $sheet->setCellValueByColumnAndRow($colIndex + 1, $startRow + $rowIndex, $value);
+                $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
+                $cellAddress = $colLetter . ($startRow + $rowIndex);
+                $sheet->setCellValue($cellAddress, $value);
             }
         }
 
